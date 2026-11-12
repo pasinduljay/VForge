@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vforge-api"
+version = "0.0.1"
+description = "VForge control-plane API (Phase 1 domain & access foundation)"
+requires-python = ">=3.13"
+dependencies = [
+  "fastapi>=0.115.0,<1.0.0",
+  "uvicorn>=0.32.0,<1.0.0",
+  "pydantic-settings>=2.6.0,<3.0.0",
+  "pydantic[email]>=2.10.0,<3.0.0",
+  "sqlalchemy[asyncio]>=2.0.36,<3.0.0",
+  "psycopg[binary,pool]>=3.2.3,<4.0.0",
+  "alembic>=1.14.0,<2.0.0",
+  "httpx>=0.28.0,<1.0.0",
+  "valkey>=6.0.0,<7.0.0",
+  "aio-pika>=9.5.0,<10.0.0",
+  "pyjwt[crypto]>=2.10.0,<3.0.0",
+  "cryptography>=44.0.0,<47.0.0",
+  "pyyaml>=6.0.2,<7.0.0",
+  "vforge-scope>=0.1.0",
+  "vforge-scanners>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0,<9.0.0",
+  "pytest-asyncio>=0.25.0,<1.0.0",
+  "hypothesis>=6.120.0,<7.0.0",
+  "ruff>=0.9.0,<1.0.0",
+  "mypy>=1.14.0,<2.0.0",
+  "types-PyYAML>=6.0.12,<7.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+cache-dir = "/tmp/.ruff_cache"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true
+mypy_path = "src"
+cache_dir = "/tmp/.mypy_cache"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+cache_dir = "/tmp/.pytest_cache"
