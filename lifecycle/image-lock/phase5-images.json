@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "phase": 5,
+  "updated_at": "2026-11-12T00:00:00Z",
+  "images": [
+    {
+      "tool_id": "opengrep",
+      "tool_version": "1.33.1",
+      "image": "vforge-opengrep:1.33.1@sha256:a92cb260fea66c388fdf32924ae67ae933be6f13473e3e5c945182c1e4c01365",
+      "digest": "sha256:a92cb260fea66c388fdf32924ae67ae933be6f13473e3e5c945182c1e4c01365",
+      "source_dockerfile": "runner/images/opengrep/Dockerfile",
+      "network_profile": "none",
+      "read_only_root": true
+    },
+    {
+      "tool_id": "gitleaks",
+      "tool_version": "8.24.0",
+      "image": "zricethezav/gitleaks@sha256:2bcceac45179b3a91bff11a824d0fb952585b429e54fc928728b1d4d5c3e5176",
+      "digest": "sha256:2bcceac45179b3a91bff11a824d0fb952585b429e54fc928728b1d4d5c3e5176",
+      "upstream_tag": "zricethezav/gitleaks:v8.24.0",
+      "network_profile": "none",
+      "read_only_root": true
+    }
+  ]
+}

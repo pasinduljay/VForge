@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase": 7,
+  "updated_at": "2026-11-12T00:00:00Z",
+  "images": [
+    {
+      "tool_id": "zap",
+      "tool_version": "2.16.0",
+      "image": "ghcr.io/zaproxy/zaproxy@sha256:391f66efa53b30de40d4a1c6e28146477263552fc828bc7613c9cd11a2949908",
+      "digest": "sha256:391f66efa53b30de40d4a1c6e28146477263552fc828bc7613c9cd11a2949908",
+      "upstream_tag": "ghcr.io/zaproxy/zaproxy:2.16.0",
+      "network_profile": "scoped-http-egress",
+      "read_only_root": true,
+      "automation_framework": true
+    },
+    {
+      "tool_id": "nuclei",
+      "tool_version": "3.11.1",
+      "image": "projectdiscovery/nuclei@sha256:582d5546902e67052097cb2d07296c642d50a1afc5e44623cb038845df9a32eb",
+      "digest": "sha256:582d5546902e67052097cb2d07296c642d50a1afc5e44623cb038845df9a32eb",
+      "upstream_tag": "projectdiscovery/nuclei:v3.11.1",
+      "network_profile": "scoped-http-egress",
+      "read_only_root": true,
+      "pinned_templates": true
+    },
+    {
+      "tool_id": "nmap",
+      "tool_version": "7.98",
+      "image": "instrumentisto/nmap@sha256:96f6ed194519b62421a1a1c57809e65a7f94d2aa1c8c25676f247e5e148c0827",
+      "digest": "sha256:96f6ed194519b62421a1a1c57809e65a7f94d2aa1c8c25676f247e5e148c0827",
+      "upstream_tag": "instrumentisto/nmap:7.98",
+      "network_profile": "scoped-http-egress",
+      "read_only_root": true,
+      "tcp_connect_only": true
+    },
+    {
+      "tool_id": "testssl",
+      "tool_version": "3.2.5",
+      "image": "drwetter/testssl.sh@sha256:e42cb1ba9445ea861e8b6eec96b97f6f293ce4e5908eebc75c28bdd96d66108e",
+      "digest": "sha256:e42cb1ba9445ea861e8b6eec96b97f6f293ce4e5908eebc75c28bdd96d66108e",
+      "upstream_tag": "drwetter/testssl.sh:3.2.5",
+      "network_profile": "scoped-http-egress",
+      "read_only_root": true
+    }
+  ]
+}

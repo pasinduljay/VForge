@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0.0",
+  "phase": "phase-1",
+  "verifiedAt": "2026-11-12T09:10:00Z",
+  "images": [
+    {
+      "role": "database",
+      "repository": "postgres",
+      "tag": "18",
+      "digest": "sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "reference": "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "notes": "PostgreSQL 18 with RLS policies and separated owner/app roles"
+    },
+    {
+      "role": "broker",
+      "repository": "rabbitmq",
+      "tag": "4-management",
+      "digest": "sha256:7ddb7fd4630026bc84f72760f33629e8c1ef3bb106360fb385fae0dd4ef886f3",
+      "reference": "rabbitmq:4-management@sha256:7ddb7fd4630026bc84f72760f33629e8c1ef3bb106360fb385fae0dd4ef886f3",
+      "notes": "RabbitMQ 4.x on internal control network only"
+    },
+    {
+      "role": "cache",
+      "repository": "valkey/valkey",
+      "tag": "9-alpine",
+      "digest": "sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b",
+      "reference": "valkey/valkey:9-alpine@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b",
+      "notes": "Valkey 9.x Alpine for rate limiting and cache on internal control network only"
+    },
+    {
+      "role": "policy",
+      "repository": "openpolicyagent/opa",
+      "tag": "1.22.3",
+      "digest": "sha256:c1632ced2b6726a257a075523ce4d86258b721b5512e05ee3344ae26148e9031",
+      "reference": "openpolicyagent/opa:1.22.3@sha256:c1632ced2b6726a257a075523ce4d86258b721b5512e05ee3344ae26148e9031",
+      "notes": "OPA v1.22.3 rootless minimal image; 7-role RBAC Rego bundle"
+    },
+    {
+      "role": "dev-idp",
+      "repository": "quay.io/keycloak/keycloak",
+      "tag": "26.4.0",
+      "digest": "sha256:5f3fb534cde6bf006d79f5912473e5d2c828c707cdfc52e16972803aca9d43dd",
+      "reference": "quay.io/keycloak/keycloak:26.4.0@sha256:5f3fb534cde6bf006d79f5912473e5d2c828c707cdfc52e16972803aca9d43dd",
+      "notes": "Opt-in local development OIDC provider (--profile dev-oidc); isolated from control DB/broker network"
+    },
+    {
+      "role": "api-base",
+      "repository": "python",
+      "tag": "3.13-slim",
+      "digest": "sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90",
+      "reference": "python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90",
+      "notes": "Base image for apps/api"
+    },
+    {
+      "role": "web-base",
+      "repository": "node",
+      "tag": "24-alpine",
+      "digest": "sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5",
+      "reference": "node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5",
+      "notes": "Base image for apps/web"
+    }
+  ]
+}

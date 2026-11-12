@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests"],
+  "schedule": ["before 5am on monday"],
+  "timezone": "Asia/Colombo",
+  "rangeStrategy": "pin",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security-advisory", "expedited-validation"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track pinned digests inside VForge lifecycle/image-lock JSON registries and .env.example",
+      "managerFilePatterns": [
+        "/^lifecycle/image-lock/.*\\.json$/",
+        "/^\\.env\\.example$/"
+      ],
+      "matchStrings": [
+        "\"reference\"\\s*:\\s*\"(?<depName>[^:@\"]+):(?<currentValue>[^@\"]+)@(?<currentDigest>sha256:[a-f0-9]{64})\"",
+        "_IMAGE=(?<depName>[^:@\\s]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["docker-compose", "dockerfile", "custom.regex"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["channel:container-base-or-engine", "major-review", "requires-approval"]
+    },
+    {
+      "matchManagers": ["docker-compose", "dockerfile", "custom.regex"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "automerge": false,
+      "labels": ["channel:container-base-or-engine", "requires-validation-pipeline"]
+    },
+    {
+      "matchPackageNames": ["cryptography", "pyjwt", "openpolicyagent/opa", "quay.io/keycloak/keycloak"],
+      "automerge": false,
+      "labels": ["channel:crypto-security-component", "security-review"]
+    },
+    {
+      "matchManagers": ["pep621", "npm"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["channel:app-dependencies", "major-review", "requires-approval"]
+    },
+    {
+      "matchManagers": ["pep621", "npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": false,
+      "labels": ["channel:app-dependencies", "requires-regression"]
+    }
+  ]
+}

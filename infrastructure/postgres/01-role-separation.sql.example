@@ -1,0 +1,19 @@
+-- VForge PostgreSQL Role Separation Reference (Bootstrap -> Migrator -> Runtime App)
+-- Execute as bootstrap superuser only; NEVER embed real passwords in tracked files.
+-- In local/production rotation, set passwords via SCRAM-SHA-256 verifier or interactive \password.
+
+-- 1. Dedicated schema & migration owner (NOSUPERUSER, NOBYPASSRLS, NOCREATEROLE)
+CREATE ROLE vforge_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOINHERIT NOREPLICATION NOBYPASSRLS;
+
+-- 2. Dedicated least-privilege runtime role (NOSUPERUSER, NOBYPASSRLS, non-owner)
+CREATE ROLE vforge_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOINHERIT NOREPLICATION NOBYPASSRLS;
+
+-- 3. Transfer database/schema ownership to vforge_migrator and restrict public schema
+ALTER DATABASE vforge OWNER TO vforge_migrator;
+ALTER SCHEMA public OWNER TO vforge_migrator;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO vforge_app;
+REVOKE ALL ON DATABASE vforge FROM PUBLIC;
+GRANT CONNECT ON DATABASE vforge TO vforge_migrator, vforge_app;

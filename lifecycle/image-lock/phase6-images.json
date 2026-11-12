@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "phase": 6,
+  "updated_at": "2026-11-12T00:00:00Z",
+  "images": [
+    {
+      "tool_id": "syft",
+      "tool_version": "1.57.1",
+      "image": "anchore/syft@sha256:03215d0e98b661d0ecbc8575dbc14d65be1743b5de5df6410aecb7e80f95b060",
+      "digest": "sha256:03215d0e98b661d0ecbc8575dbc14d65be1743b5de5df6410aecb7e80f95b060",
+      "upstream_tag": "anchore/syft:v1.57.1",
+      "network_profile": "none",
+      "read_only_root": true
+    },
+    {
+      "tool_id": "grype",
+      "tool_version": "0.121.3",
+      "image": "anchore/grype@sha256:13113eeceab017260370cf540e1d25442c59665fd07d1b09b66d63bb0c282887",
+      "digest": "sha256:13113eeceab017260370cf540e1d25442c59665fd07d1b09b66d63bb0c282887",
+      "upstream_tag": "anchore/grype:v0.121.3",
+      "network_profile": "none",
+      "read_only_root": true,
+      "offline_db_schema": "v6"
+    },
+    {
+      "tool_id": "checkov",
+      "tool_version": "3.2.435",
+      "image": "bridgecrew/checkov@sha256:ccead19bd9201d43872ceb7e78bb5868eabfc0d3960d3756fc75f4896067372a",
+      "digest": "sha256:ccead19bd9201d43872ceb7e78bb5868eabfc0d3960d3756fc75f4896067372a",
+      "upstream_tag": "bridgecrew/checkov:3.2.435",
+      "network_profile": "none",
+      "read_only_root": true
+    }
+  ]
+}

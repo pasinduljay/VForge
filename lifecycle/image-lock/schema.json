@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VForge Immutable Image-Lock Registry Schema",
+  "type": "object",
+  "required": ["schemaVersion", "phase", "verifiedAt", "updateChannels", "images"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "phase": { "type": "string" },
+    "verifiedAt": { "type": "string", "format": "date-time" },
+    "updateChannels": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "images": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "toolName",
+          "toolVersion",
+          "role",
+          "updateChannel",
+          "repository",
+          "tag",
+          "digest",
+          "reference",
+          "architecture",
+          "sourceRepository",
+          "releaseSource",
+          "signatureProvenance",
+          "sbomReference",
+          "approvalState",
+          "lastVerifiedAt"
+        ],
+        "properties": {
+          "toolName": { "type": "string", "minLength": 1 },
+          "toolVersion": { "type": "string", "minLength": 1 },
+          "role": { "type": "string", "minLength": 1 },
+          "updateChannel": {
+            "type": "string",
+            "enum": [
+              "scanner_engine_versions",
+              "container_base_images",
+              "scanner_addons",
+              "scanner_rules_and_templates",
+              "vulnerability_databases",
+              "threat_intelligence_feeds",
+              "ai_models",
+              "ai_rule_packs_and_skills",
+              "application_dependencies",
+              "cryptographic_and_security_components"
+            ]
+          },
+          "repository": { "type": "string", "minLength": 1 },
+          "tag": { "type": "string", "not": { "const": "latest" } },
+          "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "reference": { "type": "string", "pattern": "@sha256:[0-9a-f]{64}$" },
+          "architecture": { "type": "string", "minLength": 1 },
+          "sourceRepository": { "type": "string", "minLength": 1 },
+          "releaseSource": { "type": "string", "minLength": 1 },
+          "signatureProvenance": { "type": "string", "minLength": 1 },
+          "sbomReference": { "type": "string", "minLength": 1 },
+          "approvalState": {
+            "type": "string",
+            "enum": ["candidate", "validated", "approved", "canary", "stable", "rejected", "rolled_back"]
+          },
+          "lastVerifiedAt": { "type": "string", "format": "date-time" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}

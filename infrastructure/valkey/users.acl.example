@@ -1,0 +1,4 @@
+user default off
+user vforge_admin on #REPLACE_WITH_64_CHAR_SHA256_HEX_OF_VALKEY_ADMIN_PASSWORD ~* &* +@all
+user vforge_health on #REPLACE_WITH_64_CHAR_SHA256_HEX_OF_VALKEY_HEALTH_PASSWORD resetkeys -@all +ping +client|setinfo +quit
+user vforge_app on #REPLACE_WITH_64_CHAR_SHA256_HEX_OF_VALKEY_APP_PASSWORD ~vf:* resetchannels -@all +ping +select +hello +client|setinfo +quit +incr +incrby +expire +ttl
