@@ -1,0 +1,29 @@
+id: vf-cors-wildcard-origin
+
+info:
+  name: Permissive CORS Access-Control-Allow-Origin Wildcard
+  author: vforge-secops
+  severity: medium
+  description: The HTTP endpoint responds with Access-Control-Allow-Origin set to wildcard (*), potentially permitting cross-origin reads of non-public resources.
+  remediation: Restrict Access-Control-Allow-Origin strictly to trusted application origins rather than wildcard (*).
+  classification:
+    cwe-id: CWE-942
+  tags: vforge,cors,misconfig
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    headers:
+      Origin: https://evil.example.invalid
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: *"
+          - "access-control-allow-origin: *"
+        condition: or

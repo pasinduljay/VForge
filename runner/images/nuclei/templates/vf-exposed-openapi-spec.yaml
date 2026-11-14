@@ -1,0 +1,29 @@
+id: vf-exposed-openapi-spec
+
+info:
+  name: Exposed OpenAPI / Swagger Documentation
+  author: vforge-secops
+  severity: info
+  description: An OpenAPI or Swagger JSON specification endpoint is publicly reachable without authentication.
+  remediation: Restrict unauthenticated access to internal API documentation endpoints in non-public environments.
+  classification:
+    cwe-id: CWE-200
+  tags: vforge,openapi,swagger,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/openapi.json"
+      - "{{BaseURL}}/swagger.json"
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - '"openapi"'
+          - '"swagger"'
+        condition: or

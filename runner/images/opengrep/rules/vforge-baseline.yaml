@@ -1,0 +1,126 @@
+rules:
+  - id: vforge.python.command-injection.subprocess-shell
+    languages: [python]
+    severity: ERROR
+    message: Potential OS command injection via subprocess with shell=True and non-literal command.
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run($CMD, ..., shell=True, ...)
+          - pattern: subprocess.Popen($CMD, ..., shell=True, ...)
+          - pattern: subprocess.call($CMD, ..., shell=True, ...)
+          - pattern: os.system($CMD)
+      - pattern-not: subprocess.run("...", ..., shell=True, ...)
+      - pattern-not: subprocess.Popen("...", ..., shell=True, ...)
+      - pattern-not: os.system("...")
+    metadata:
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      confidence: HIGH
+      remediation: Pass an explicit argument list with shell=False instead of invoking a shell string.
+
+  - id: vforge.python.code-injection.eval-exec
+    languages: [python]
+    severity: ERROR
+    message: Dynamic code execution via eval/exec with variable input risks arbitrary code execution.
+    pattern-either:
+      - pattern: eval($EXPR)
+      - pattern: exec($EXPR)
+    pattern-not: eval("...")
+    metadata:
+      cwe:
+        - "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+      confidence: HIGH
+      remediation: Replace eval/exec with explicit parsing such as ast.literal_eval or structured dispatch.
+
+  - id: vforge.python.deserialization.pickle-yaml
+    languages: [python]
+    severity: ERROR
+    message: Unsafe deserialization (pickle.loads or yaml.load without SafeLoader) allows arbitrary code execution.
+    pattern-either:
+      - pattern: pickle.loads($DATA)
+      - pattern: yaml.load($DATA, Loader=yaml.Loader)
+      - pattern: yaml.unsafe_load($DATA)
+    metadata:
+      cwe:
+        - "CWE-502: Deserialization of Untrusted Data"
+      confidence: HIGH
+      remediation: Use JSON/MsgPack or yaml.safe_load instead of pickle or unsafe YAML loaders.
+
+  - id: vforge.python.sqli.formatted-cursor-execute
+    languages: [python]
+    severity: ERROR
+    message: SQL query constructed with string formatting or f-string passed to execute().
+    pattern-either:
+      - pattern: $CURSOR.execute(f"...{$VAR}...", ...)
+      - pattern: $CURSOR.execute("..." + $VAR, ...)
+      - pattern: $CURSOR.execute("..." % $VAR, ...)
+      - pattern: $CURSOR.execute("...".format(...), ...)
+    metadata:
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      confidence: HIGH
+      remediation: Use parameterized SQL queries / bind variables instead of string formatting.
+
+  - id: vforge.javascript.xss.dangerously-set-inner-html
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Direct HTML injection via dangerouslySetInnerHTML or innerHTML assignment risks XSS.
+    pattern-either:
+      - pattern: $EL.innerHTML = $VAL
+      - pattern: '<$TAG dangerouslySetInnerHTML={{__html: $VAL}} />'
+    metadata:
+      cwe:
+        - "CWE-79: Improper Neutralization of Input During Web Page Generation"
+      confidence: MEDIUM
+      remediation: Use safe DOM text APIs (textContent) or sanitize HTML with a strict allowlist library.
+
+  - id: vforge.javascript.code-injection.eval-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Dynamic evaluation or shell execution with variable input risks command/code injection.
+    patterns:
+      - pattern-either:
+          - pattern: eval($EXPR)
+          - pattern: child_process.exec($CMD, ...)
+      - pattern-not: eval("...")
+      - pattern-not: child_process.exec("...", ...)
+    metadata:
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      confidence: HIGH
+      remediation: Use execFile/spawn with an argument array and shell=false, and avoid eval().
+
+  - id: vforge.go.command-injection.sh-c
+    languages: [go]
+    severity: ERROR
+    message: Invoking shell interpreter via exec.Command("sh", "-c", ...) with dynamic input risks command injection.
+    patterns:
+      - pattern: exec.Command("sh", "-c", $CMD)
+      - pattern-not: exec.Command("sh", "-c", "...")
+    metadata:
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      confidence: HIGH
+      remediation: Pass the binary and fixed arguments directly to exec.Command without a shell wrapper.
+
+  - id: vforge.python.tls.insecure-skip-verify
+    languages: [python]
+    severity: WARNING
+    message: TLS certificate verification is disabled via verify=False.
+    pattern: requests.$METHOD(..., verify=False, ...)
+    metadata:
+      cwe:
+        - "CWE-295: Improper Certificate Validation"
+      confidence: HIGH
+      remediation: Enable strict TLS certificate validation using a trusted CA bundle.
+
+  - id: vforge.go.tls.insecure-skip-verify
+    languages: [go]
+    severity: WARNING
+    message: TLS certificate verification is disabled via InsecureSkipVerify.
+    pattern: "tls.Config{..., InsecureSkipVerify: true, ...}"
+    metadata:
+      cwe:
+        - "CWE-295: Improper Certificate Validation"
+      confidence: HIGH
+      remediation: Enable strict TLS certificate validation using a trusted CA bundle.

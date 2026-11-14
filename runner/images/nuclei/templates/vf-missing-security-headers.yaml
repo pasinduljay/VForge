@@ -1,0 +1,26 @@
+id: vf-missing-security-headers
+
+info:
+  name: Missing HTTP Security Headers
+  author: vforge-secops
+  severity: low
+  description: The HTTP response omits standard defense-in-depth security headers (X-Content-Type-Options or X-Frame-Options or Content-Security-Policy).
+  remediation: Configure X-Content-Type-Options: nosniff, X-Frame-Options: DENY, and Content-Security-Policy on all HTTP responses.
+  classification:
+    cwe-id: CWE-693
+  tags: vforge,headers,misconfig,passive
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 301
+          - 302
+      - type: dsl
+        dsl:
+          - "!contains(tolower(all_headers), 'x-content-type-options')"

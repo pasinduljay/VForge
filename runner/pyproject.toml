@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vforge-runner"
+version = "0.1.0"
+description = "Isolated mTLS Runner Agent, ephemeral container executor, and scoped egress gateway"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=44.0.0,<47.0.0",
+    "httpx>=0.28.0,<1.0.0",
+    "pydantic>=2.10.0,<3.0.0",
+    "vforge-scope>=0.1.0",
+    "vforge-scanners>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.14.0,<2.0.0",
+    "pytest>=8.3.0,<9.0.0",
+    "pytest-asyncio>=0.25.0,<1.0.0",
+    "ruff>=0.9.0,<1.0.0",
+]
+
+[project.scripts]
+vforge-runner = "vforge_runner.agent.runner_agent:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vforge_runner*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+cache_dir = "/tmp/.pytest_cache"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+cache-dir = "/tmp/.ruff_cache"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "S", "UP"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+cache_dir = "/tmp/.mypy_cache"
