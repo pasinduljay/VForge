@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vforge-scanners"
+version = "0.1.0"
+description = "Shared ScannerAdapter SDK, polyglot language capability registry, secret redaction, and Phase 5 OpenGrep/Gitleaks adapters for VForge."
+requires-python = ">=3.13"
+dependencies = [
+  "pydantic>=2.10.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0,<9.0.0",
+  "ruff>=0.9.0,<1.0.0",
+  "mypy>=1.14.0,<2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vforge_scanners = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
