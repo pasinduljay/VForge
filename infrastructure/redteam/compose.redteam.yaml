@@ -1,0 +1,51 @@
+# VForge Optional AI Red-Team Sandbox (Strix / PentAGI) — OPT-IN, NOT STARTED BY DEFAULT
+#
+# Safety guarantees (verified programmatically by vforge.redteam.policy.verify_redteam_compose_isolation):
+# 1. The agent attaches ONLY to the already-isolated learning-lab network (`internal: true`,
+#    defined and verified by infrastructure/lab/compose.lab.yaml). No internet egress, no control plane.
+# 2. No published ports, no host bind mounts, no Docker socket, no host namespaces, not privileged.
+# 3. Image reference is REQUIRED from the operator (`REDTEAM_AGENT_IMAGE`) and must be a reviewed
+#    `@sha256:` digest — VForge does not ship an unverified agent image or invent a digest.
+# 4. Read-only root filesystem, cap_drop ALL, no-new-privileges, non-root user, memory/PID limits,
+#    disposable tmpfs only, `restart: "no"` so it cannot persist after the session is cleaned up.
+# 5. No secrets are injected. Model access must use a local inference endpoint inside the lab network
+#    or the governed AI gateway; direct provider API keys must never be mounted into this container.
+#
+# Usage (only after a human-approved session exists in the Security Ops "AI Red Team" console):
+#   $env:REDTEAM_AGENT_IMAGE = "<repo>@sha256:<reviewed digest>"
+#   docker compose -f infrastructure/redteam/compose.redteam.yaml --profile redteam up -d
+#   ... run ... then ALWAYS: docker compose -f infrastructure/redteam/compose.redteam.yaml --profile redteam down
+#   (never use `down -v` on VForge control-plane volumes; this project owns no named volumes.)
+
+name: vforge-redteam
+
+networks:
+  lab_internal:
+    external: true
+    name: vforge-lab_lab_internal
+
+services:
+  ai-redteam-agent:
+    image: ${REDTEAM_AGENT_IMAGE:?Set REDTEAM_AGENT_IMAGE to a reviewed repo@sha256:<digest> reference}
+    profiles: ["redteam"]
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    networks:
+      - lab_internal
+    environment:
+      VFORGE_REDTEAM_MODE: lab-only
+      VFORGE_REDTEAM_MAX_SESSION_SECONDS: "1800"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /home/agent:rw,noexec,nosuid,size=64m
+    stop_grace_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          pids: 256

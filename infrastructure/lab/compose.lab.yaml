@@ -1,0 +1,144 @@
+# VForge Isolated Vulnerable-Application Learning Lab (Opt-In Only)
+# Safety Guarantees:
+# 1. Uses an internal-only Docker bridge (`internal: true`) — zero internet / outbound egress.
+# 2. Completely decoupled from the VForge control-plane Compose project & PostgreSQL network.
+# 3. Host bindings are restricted to 127.0.0.1 loopback addresses only.
+# 4. All images are pinned by immutable @sha256 digest (never :latest).
+# 5. State lives in disposable tmpfs mounts so container recreation resets cleanly.
+
+name: vforge-lab
+
+networks:
+  lab_internal:
+    driver: bridge
+    internal: true
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:v17.1.1@sha256:9e437b456e444ff001d1663e4f6f05c796fe02f1058dd2651d6791a15b43dfeb
+    profiles: ["lab"]
+    restart: "no"
+    networks:
+      - lab_internal
+    ports:
+      - "127.0.0.1:3100:3000"
+    environment:
+      NODE_ENV: ctf
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+
+  webgoat:
+    image: webgoat/webgoat:v2023.8@sha256:01672eb9aeba60d042ae1131d6de683b98fa64e9da60fa5d3daad2642a6795dd
+    profiles: ["lab"]
+    restart: "no"
+    networks:
+      - lab_internal
+    ports:
+      - "127.0.0.1:3101:8080"
+    environment:
+      WEBGOAT_HOST: 127.0.0.1
+      WEBGOAT_PORT: "8080"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /home/webgoat/.webgoat:rw,nosuid,size=128m
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          pids: 192
+
+  crapi-db:
+    image: postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    profiles: ["lab"]
+    restart: "no"
+    networks:
+      - lab_internal
+    environment:
+      POSTGRES_DB: crapi_disposable
+      POSTGRES_USER: crapi_lab
+      POSTGRES_PASSWORD: ${LAB_CRAPI_DB_PASSWORD:-vf-lab-disposable-db}
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/lib/postgresql:rw,nosuid,size=256m
+      - /tmp:rw,noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crapi_lab -d crapi_disposable"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  crapi-identity:
+    image: crapi/crapi-identity:develop@sha256:91479dff8d24def7cb6570a61efd7b2385e6617ff48bc6a972eca90e4d14695c
+    profiles: ["lab"]
+    restart: "no"
+    depends_on:
+      crapi-db:
+        condition: service_healthy
+    networks:
+      - lab_internal
+    environment:
+      DB_HOST: crapi-db
+      DB_PORT: "5432"
+      DB_NAME: crapi_disposable
+      DB_USER: crapi_lab
+      DB_PASSWORD: ${LAB_CRAPI_DB_PASSWORD:-vf-lab-disposable-db}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+
+  crapi-web:
+    image: crapi/crapi-web:develop@sha256:5e57f256a92cbf4d7ad8afa236f56c7af34bc1ec04c523ea388782936a06a586
+    profiles: ["lab"]
+    restart: "no"
+    depends_on:
+      - crapi-identity
+    networks:
+      - lab_internal
+    ports:
+      - "127.0.0.1:3102:80"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          pids: 64
