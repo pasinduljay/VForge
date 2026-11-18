@@ -1,0 +1,38 @@
+groups:
+  - name: vforge-security-and-availability
+    rules:
+      - alert: VForgeApiDown
+        expr: up{job="vforge-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VForge API metrics endpoint unreachable"
+          description: "Prometheus cannot scrape VForge control-plane API /metrics."
+
+      - alert: VForgeRateLimitSpike
+        expr: increase(vforge_rate_limit_hits_total[5m]) > 50
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated HTTP 429 rate-limit rejections on VForge API"
+          description: "More than 50 rate-limited requests observed in 5 minutes."
+
+      - alert: VForgeSecurityDenialsSpike
+        expr: increase(vforge_security_denials_total[5m]) > 25
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spike in RBAC/OPA/auth denials"
+          description: "Investigate potential brute-force or unauthorized tenant access attempts."
+
+      - alert: VForgeDrDrillFailure
+        expr: increase(vforge_dr_drills_total{outcome="failed"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DR backup integrity/decryption drill failed"
+          description: "At least one encrypted DR backup restore verification drill failed."

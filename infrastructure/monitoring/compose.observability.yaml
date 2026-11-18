@@ -1,0 +1,91 @@
+# Opt-in Phase 14 Observability Stack (Prometheus + Grafana)
+# Usage: docker compose -f infrastructure/monitoring/compose.observability.yaml --profile monitoring up -d
+# Strictly loopback-bound (127.0.0.1), hardened containers, read-only mounts, non-root.
+# Note: Before production deployment, pin image references to verified immutable @sha256 digests
+#       via PROMETHEUS_IMAGE / GRAFANA_IMAGE and terminate TLS with METRICS_BEARER_TOKEN enabled.
+
+services:
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.2.1@sha256:692f342fffa4e5381ae2f7efeb5ac6a4beb90a6f6a82b470c7d7c0b0908b3661}
+    profiles: ["monitoring"]
+    container_name: vforge-prometheus
+    user: "65534:65534"
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - vforge_prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - vforge_monitoring
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.6.0@sha256:93aaac9c958dbfee9673303923d4fe49f5bc9c907ec5aa702c78efcf8e016a38}
+    profiles: ["monitoring"]
+    container_name: vforge-grafana
+    user: "472:472"
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-vforge_ops}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in local environment}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_COOKIE_SECURE: ${GRAFANA_COOKIE_SECURE:-false}
+      GF_SECURITY_COOKIE_SAMESITE: "strict"
+    volumes:
+      - vforge_grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - vforge_monitoring
+
+volumes:
+  vforge_prometheus_data:
+  vforge_grafana_data:
+
+networks:
+  vforge_monitoring:
+    name: vforge_monitoring
+    driver: bridge
