@@ -1,0 +1,95 @@
+# VForge Final Independent Security Audit Report (Phases 0–15)
+
+> **Audit Branch:** `chore/final-release-verification`  
+> **Baseline Commit Audited:** `6bc0119` (`d29b3a6` Phase 15 implementation + `6bc0119` ledger/acceptance report)  
+> **Methodology:** Adversarial source-code review, live database privilege/RLS/trigger inspection, container security flag inspection, disposable-DB migration audit (`0001..0016`), and negative security test execution.
+
+---
+
+## 1. Domain-by-Domain Security Audit Findings
+
+### 1.1 Authentication & Session Security (`apps/api/src/vforge/auth/`, `apps/api/src/vforge/api/deps.py`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **OIDC Authorization Code + PKCE (`S256`)** | `apps/api/src/vforge/auth/oidc.py`: Generates 32-byte CSPRNG `code_verifier`, SHA-256 `S256` `code_challenge`, `state`, and `nonce` stored in `oidc_auth_states` with 10-minute expiry and one-time consumption. Verified in `apps/api/tests/test_oidc_auth.py` and `test_api_phase1_e2e.py`. | **PASS** |
+| **Token Signature, Issuer, Audience & Nonce Validation** | `oidc.py`: Validates RS256/ES256 JWT signatures against cached/refreshed OIDC JWKS, enforces `iss`, `aud`, `exp`, `iat`, and constant-time `hmac.compare_digest` on `nonce`. | **PASS** |
+| **Session Cookie Hardening (`HttpOnly`, `SameSite`, `Secure`)** | `apps/api/src/vforge/auth/sessions.py`: Stores only SHA-256 `token_hash` in `auth_sessions`; sets `HttpOnly=True`, `SameSite="lax"`, and `Secure=True` in production/staging (`session_cookie_secure`). | **PASS** |
+| **Session Revocation & Expiry** | `sessions.py`: Enforces sliding idle timeout + absolute expiry (`expires_at`) and Valkey revocation cache (`vf:session:revoked:<hash>`). | **PASS** |
+| **CSRF Protection on Cookie-Authenticated Mutations** | `deps.py:105-106` & `sessions.py`: Constant-time `hmac.compare_digest` verification of `X-CSRF-Token` against `auth_session.csrf_token_hash` on all `POST`, `PUT`, `PATCH`, `DELETE` requests authenticated via session cookie. | **PASS** |
+| **Auth Rate Limiting** | `apps/api/src/vforge/security/rate_limit.py`: Sliding-window rate limiter backed by Valkey (`vf:rl:*`) with in-memory fallback. | **PASS** |
+
+### 1.2 Authorization, RBAC, Segregation of Duties & OPA (`apps/api/src/vforge/auth/rbac.py`, `policies/rego/vforge/`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **7-Role RBAC Matrix (`owner`, `admin`, `security_lead`, `security_analyst`, `developer`, `auditor`, `viewer`)** | `apps/api/src/vforge/auth/rbac.py` and `policies/rego/vforge/authz.rego`: Default-deny (`default allow := false`) across all 15 phases. Verified by `apps/api/tests/test_rbac_matrix.py` (exhaustive 7-role x 61-permission matrix) and `opa test /policies -v` (`44/44` Rego tests pass). | **PASS** |
+| **Segregation of Duties (SoD)** | Self-approval is blocked in both service layers and `authz.rego` for: Phase 1/2 target `Authorizations` (`requester_id != approver_id`), Phase 8 `RiskExceptions` (`requested_by != reviewed_by`), Phase 10 `UpdateApprovals` (`requested_by != approved_by`), Phase 11 `RulePackVersions` (`created_by != approved_by`), Phase 12 `AiDataEgressApprovals` (`requested_by != decided_by`), and Phase 15 `RedTeamSessions` (`requested_by != approved_by`). | **PASS** |
+| **Audit Defect Remediated (`VF-AUDIT-007` & `VF-AUDIT-009`)** | `POST /api/v1/organizations/{org_id}/findings/evaluate-sla` previously lacked `assert_permission(ctx.role, Permission.FINDING_TRIAGE)`, and global `/api/v1/intel/*` routes lacked active-org membership + `Permission.INTEL_READ` / `Role.SECURITY_ANALYST` checks. Both were remediated and verified with regression tests. | **PASS (Remediated)** |
+
+### 1.3 Database, Role Separation & Row-Level Security (`apps/api/alembic/versions/0001..0016`, `apps/api/src/vforge/db.py`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **3-Tier PostgreSQL Role Separation** | Bootstrap admin (`vforge`), schema owner (`vforge_migrator` — `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`), and runtime application role (`vforge_app` — `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`, owns `0` tables). Enforced at API startup by `verify_runtime_db_identity()`. | **PASS** |
+| **`ENABLE` + `FORCE ROW LEVEL SECURITY` on All Tenant Tables** | All `63` tenant-scoped tables across migrations `0002`–`0016` have `relrowsecurity = true` and `relforcerowsecurity = true`. Verified in live DB, disposable migration DB, and restored DR DB (`rls_forced=63`). | **PASS** |
+| **Append-Only Audit & Evidence Triggers** | `35` PostgreSQL triggers enforce immutability on `audit_events`, `scope_snapshots`, `runner_events`, `artifacts`, `source_snapshots`, `finding_occurrences`, `sbom_documents`, `vuln_db_snapshots`, `target_health_probes`, `finding_events`, `intel_snapshots`, `intel_enrichment_events`, `update_audit_events`, `studio_audit_events`, `ai_audit_events`, `lab_audit_events`, `dr_restore_drills`, `hardening_audit_events`, `ai_redteam_events`, `ai_redteam_benchmarks`, plus state-guard triggers on `ai_redteam_sessions` and `ai_redteam_observations`. | **PASS** |
+| **Audit Defects Remediated (`VF-AUDIT-003`, `VF-AUDIT-008`)** | Fixed `0002` role-management guard under `vforge_migrator`; added `NULLIF(..., '')` before `::uuid` in `0009`/`0010` RLS policies; fixed 7 composite FKs (`ON DELETE RESTRICT` / `ON DELETE SET NULL (<col>)`); wrapped `delete_project` in a savepoint returning `HTTP 409 Conflict` when immutable child records exist. | **PASS (Remediated)** |
+
+### 1.4 Scope Validation & SSRF / Rebinding Defenses (`packages/scope-validator/`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **RFC1918, Loopback, Link-Local, Cloud Metadata & IPv6 Denial** | `packages/scope-validator/src/vforge_scope/`: Blocks `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.169.254` (cloud metadata), multicast, CGNAT, `::1`, `fe80::/10`, `fc00::/7`, and IPv4-mapped IPv6 (`::ffff:169.254.169.254`) unless `allow_private_networks` is explicitly authorized. | **PASS** |
+| **DNS Rebinding & Pre-Connect Re-Resolution** | Re-resolves hostnames immediately before socket connection and blocks any resolution where any returned A/AAAA record falls outside approved CIDRs. | **PASS** |
+| **Ed25519 Signed `scope_snapshots`** | Every approved scope is frozen into an immutable `scope_snapshots` row signed with `Ed25519` (`SnapshotSigner`) and verified before scan planning and runner execution. | **PASS** |
+
+### 1.5 Runner & Ephemeral Scanner Isolation (`runner/`, `packages/scanner-contracts/`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **Control Plane / Execution Plane Separation** | Control Plane (`api`, `frontend`, `orchestrator`, `update-controller`, `postgres`, `rabbitmq`, `valkey`, `opa`) mounts zero Docker sockets (`docker_socket_mounted: false`). | **PASS** |
+| **Runner mTLS & Signed Job Manifests** | `apps/api/src/vforge/runner_gateway.py` & `runner/vforge_runner/`: Enforces mutual TLS (`ECDSA P-256` leaf certs + CRL/DB revocation check) and `Ed25519` job manifest signature verification before any container launch. | **PASS** |
+| **Ephemeral Scanner Container Hardening (`VF-AUDIT-013` Remediated)** | `runner/vforge_runner/executor/container_executor.py` & `runner/network-policy/seccomp-scanner.json`: Enforces `@sha256` digest pinning, `--read-only`, `--cap-drop=ALL`, `--security-opt=no-new-privileges:true`, seccomp profile (`SCMP_ACT_ERRNO` default deny with unprivileged filesystem/process syscalls including `mkdir`/`mkdirat` verified live against `opengrep` and `gitleaks`), `--pids-limit`, `--memory`, `--cpus`, non-root UID `10001:10001`, and `--network=none` for offline scanners (`opengrep`, `gitleaks`, `syft`, `grype`, `checkov`). | **PASS (Remediated)** |
+| **Scoped Egress Gateway (`VF-AUDIT-011` Remediated)** | `runner/vforge_runner/network_policy/egress_gateway.py`: Enforces per-hop DNS re-resolution, port/scheme allowlists, redirect validation, and bounded 10 MiB response reads (`VF-AUDIT-011`). | **PASS (Remediated)** |
+
+### 1.6 AI Governance & Optional Red-Team Sandbox Security (`apps/api/src/vforge/ai_gateway/`, `apps/api/src/vforge/redteam/`, `infrastructure/redteam/`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **Pre-Egress Data Classification & Secret/PII Redaction** | `apps/api/src/vforge/ai_gateway/classification.py`: Redacts API keys, PEM keys, JWTs, AWS keys, emails, and SSNs before any model prompt construction; blocks restricted data egress without SoD approval. | **PASS** |
+| **Prompt-Injection Quarantine & Deterministic Fallback** | Wraps untrusted scanner/code snippets in HTML-escaped `<untrusted_data sha256="...">` delimiters (`VF-P12-001`), strips control characters, and runs 100% offline deterministically unless an external model endpoint is explicitly configured and approved. | **PASS** |
+| **Phase 15 Red-Team Sandbox Isolation (`VF-AUDIT-004` Remediated)** | `infrastructure/redteam/compose.redteam.yaml` is opt-in (`profiles: ["redteam"]`), disabled by default, requires `@sha256` digest, attaches strictly to `vforge-lab_lab_internal` (`internal: true`), enforces human SoD approval, freezes session scope/budgets via PostgreSQL trigger, and requires human review before any `hypothesis` becomes `confirmed`. `/api/v1/meta` honestly reports `ai_redteam_governance_enabled: true` and `ai_redteam_sandbox_enabled: false` by default. | **PASS (Remediated)** |
+
+### 1.7 Application & Parser Security (`packages/scanner-contracts/src/vforge_scanners/archive.py`, `apps/api/src/vforge/studio/`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **Archive Bomb, Zip-Slip & Symlink Rejection** | `archive.py`: Enforces max compressed size, max decompressed bytes, max compression ratio, max member count, and rejects `..` traversal, absolute paths, symlinks, hardlinks, and device nodes before extraction. Verified in `apps/api/tests/test_phase14_hardening_dr.py`. | **PASS** |
+| **Safe YAML Loading (`yaml.safe_load`)** | All YAML parsing in Studio (`studio/validators.py`), Lab (`lab/safety.py`), and Red-Team (`redteam/policy.py`) uses `yaml.safe_load` with size and depth limits. | **PASS** |
+
+### 1.8 Infrastructure & Container Security (`docker-compose.yml`, `infrastructure/`)
+
+| Control | Implementation & Verification Evidence | Classification |
+|---|---|---|
+| **Digest Pinning & Hardened Containers (`VF-AUDIT-012` Remediated)** | All images in `docker-compose.yml`, `runner/docker-compose.runner.yml`, `infrastructure/lab/compose.lab.yaml`, `infrastructure/redteam/compose.redteam.yaml`, and `infrastructure/monitoring/compose.observability.yaml` use `@sha256` digests, `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges:true`, and loopback host port bindings (`127.0.0.1`). | **PASS (Remediated)** |
+
+---
+
+## 2. Complete Final Audit Defect & Remediation Log (`VF-AUDIT-001` .. `VF-AUDIT-013`)
+
+| Defect ID | Severity | Location | Finding Description | Remediation Applied & Verification |
+|---|---|---|---|---|
+| **VF-AUDIT-001** | **HIGH** | `tests/smoke/phase6_smoke.ps1`, `tests/smoke/phase15_smoke.ps1`, `tests/smoke/phase9..14_smoke.ps1`, `tests/smoke/phase0_smoke.sh` | `phase6_smoke.ps1` and `phase15_smoke.ps1` ran `alembic downgrade` directly against the live persistent `vforge` DB; `phase9..14_smoke.ps1` used exact-match head regexes that failed at `0016`. | Removed live DB downgrades from `phase6_smoke.ps1` and `phase15_smoke.ps1`; created `scripts/db/verify_migrations_disposable.ps1` (`0001..0016` upgrade -> downgrade `base` -> upgrade `head` on disposable DB); updated revision regexes in `phase9..14_smoke.ps1` and `phase0_smoke.sh`. |
+| **VF-AUDIT-002** | **HIGH** | `scripts/dr/backup_and_verify.ps1`, `docs/DISASTER_RECOVERY_RESTORE_REPORT.md`, `docs/runbooks/BACKUP_AND_DR.md` | Script previously verified `pg_dump` archives only via `pg_restore --list` without restoring into an isolated PostgreSQL instance, and did not execute isolated restore drills for RabbitMQ, Valkey, Artifacts, or Grype DB provenance. | Upgraded `scripts/dr/backup_and_verify.ps1` to launch isolated disposable containers on `--internal` Docker network `vforge_dr_verify_net_*` for PostgreSQL 18.6 (`pg_restore --exit-on-error`), RabbitMQ 4.4 (`rabbitmqctl import_definitions`), Valkey 9.1 (`/data` + `users.acl` `NOAUTH` restore), `vforge_artifacts` archive extraction parity, and `vforge_grype_db` v6 SQLite provenance verification. |
+| **VF-AUDIT-003** | **MEDIUM** | `apps/api/alembic/versions/0002`, `0005`, `0006`, `0008`, `0009`, `0010` | `0002` attempted `ALTER ROLE vforge_app WITH LOGIN PASSWORD` even when run by `vforge_migrator` (`NOCREATEROLE`), failing on fresh disposable DBs; `0009`/`0010` RLS policies omitted `NULLIF(..., '')` before `::uuid`; 7 composite FKs in `0005`/`0006`/`0008`/`0009` used unqualified `ON DELETE SET NULL`; `0009` `downgrade()` failed if report artifacts (`scan_run_id IS NULL`) existed. | Added `rolsuper OR rolcreaterole` check + `set_config(..., '', true)` scrub in `0002`; added `NULLIF(..., '')` in `0009`/`0010` RLS policies; updated the 7 composite FKs to `ON DELETE RESTRICT` / `ON DELETE SET NULL (<col>)`; cleaned up null-run report artifacts in `0009` `downgrade()`; synchronized live DB and verified full `base -> 0016 -> base -> 0016` chain via `scripts/db/verify_migrations_disposable.ps1`. |
+| **VF-AUDIT-004** | **MEDIUM** | `apps/api/src/vforge/main.py:311`, `apps/api/Dockerfile` | `/api/v1/meta` hardcoded `"ai_redteam_sandbox_enabled": True` even when the opt-in `--profile redteam` container (`REDTEAM_AGENT_IMAGE`) was not configured/running. | Added `"ai_redteam_governance_enabled": True`, `"ai_redteam_sandbox_profile": "opt_in_disabled_by_default"`, and set `"ai_redteam_sandbox_enabled": bool(os.getenv("REDTEAM_AGENT_IMAGE", "").strip())` (`False` by default); copied `infrastructure/{lab,redteam}`, `lifecycle/image-lock`, and `policies` into `/opt/` in `apps/api/Dockerfile`. |
+| **VF-AUDIT-005** | **LOW** | `apps/api/tests/test_security_preflight.py`, `tests/smoke/phase15_smoke.ps1` | `test_repo_config_and_image_lock_hygiene_when_repo_present` and `test_postgresql_migrator_role_separation_when_configured` were skipped during standard `api` container pytest runs. | Updated `_find_repo_root()` to inspect `/workspace`, mounted `-v "${PWD}:/workspace:ro"` in `phase15_smoke.ps1`, and added an explicit `migrator pytest tests/test_rls_isolation.py -k test_postgresql_migrator_role_separation_when_configured` step so both tests execute and pass. |
+| **VF-AUDIT-006** | **LOW** | `docs/RELEASE_ACCEPTANCE.md`, `docs/runbooks/DEPLOYMENT_AND_UPGRADE.md`, `docs/runbooks/BACKUP_AND_DR.md` | Documentation linked to `DISASTER_RECOVERY.md` instead of `BACKUP_AND_DR.md`. | Fixed links to `BACKUP_AND_DR.md` and documented the multi-service DR restore drills, retention/RPO/RTO matrix, and disposable migration chain verification. |
+| **VF-AUDIT-007** | **HIGH** | `apps/api/src/vforge/api/routers/findings.py:212`, `apps/api/src/vforge/services/findings.py:1222` | `POST /api/v1/organizations/{org_id}/findings/evaluate-sla` lacked `assert_permission(ctx.role, Permission.FINDING_TRIAGE)`, allowing `viewer`/`auditor` roles to trigger SLA breach and risk-exception expiry mutations. | Enforced `assert_permission(ctx.role, Permission.FINDING_TRIAGE)` in both `evaluate_sla_route` and `check_and_update_sla_breaches`; verified with negative RBAC regression test in `test_phase8_findings_reporting.py`. |
+| **VF-AUDIT-008** | **HIGH** | `apps/api/src/vforge/services/projects.py:161` | `DELETE /api/v1/organizations/{org_id}/projects/{project_id}` executed hard SQL `DELETE` cascading into append-only child tables (`scope_snapshots`, `artifacts`, `findings`, etc.), raising unhandled trigger error `55000` (`HTTP 500`). | Wrapped `delete_project` in a nested savepoint (`db.begin_nested()`) catching `(IntegrityError, DBAPIError)` and raising `ConflictError` (`HTTP 409 Conflict`) instructing callers to archive projects with immutable security history; verified in `test_phase8_findings_reporting.py`. |
+| **VF-AUDIT-009** | **MEDIUM** | `apps/api/src/vforge/api/routers/intel.py:42-195` | Global `/api/v1/intel/*` read endpoints did not verify active organization membership + `Permission.INTEL_READ`, and `POST /api/v1/intel/sources/{source_slug}/sync` omitted `Role.SECURITY_ANALYST` and `Organization.status == 'active'`. | Added `_require_global_intel_permission` joining `Membership` and active `Organization` for `Permission.INTEL_READ` and `Permission.INTEL_MANAGE`. |
+| **VF-AUDIT-010** | **LOW** | `apps/api/src/vforge/main.py:87`, `observability/metrics.py:99`, `secrets/provider.py:171`, `orchestration/service.py:195`, `api/routers/projects.py` | Missing `X-VForge-Actor-Type` in CORS `allow_headers`; default `phase=14` in `render_prometheus_text`; `<NAME>_FILE` pointer in `DockerSecretProvider` bypassed path containment; `auth_profile_id` omitted from scan idempotency fingerprint; project mutation routes lacked `enforce_sensitive_rate_limit`. | Remediated all 5 items and added unit test `test_docker_secret_provider_rejects_file_pointer_traversal` in `test_security_preflight.py`. |
+| **VF-AUDIT-011** | **MEDIUM** | `runner/vforge_runner/network_policy/egress_gateway.py:590` | `ScopedEgressGateway._forward_single_http_request` read upstream plain-HTTP responses with unbounded `up_reader.read(-1)`. | Bounded upstream response reads to `10 MiB` (`max_resp_bytes = 10 * 1024 * 1024`), raising `EgressBlockedError("response_too_large", ...)` if exceeded. |
+| **VF-AUDIT-012** | **MEDIUM** | `infrastructure/monitoring/compose.observability.yaml:9,23,46` | Default Prometheus/Grafana fallback image tags lacked `@sha256:` digests and Prometheus enabled `--web.enable-lifecycle`. | Pinned default Prometheus and Grafana fallback images by `@sha256:` digest and removed `--web.enable-lifecycle`. |
+| **VF-AUDIT-013** | **MEDIUM** | `runner/network-policy/seccomp-scanner.json`, `runner/Dockerfile`, `tests/smoke/phase15_smoke.ps1` | Executing the previously skipped `test_live_docker_opengrep_and_gitleaks_if_available` test revealed that `seccomp-scanner.json` (`SCMP_ACT_ERRNO`) omitted `mkdir`/`mkdirat` (causing `opengrep` to fail with `PermissionError: [Errno 1] Operation not permitted: '/tmp/.opengrep'`) and `runner/Dockerfile` omitted `runner/images/dummy-scanner`. | Added standard unprivileged filesystem/process syscalls (`mkdir`, `mkdirat`, `rmdir`, `chmod`, `fchmod`, `umask`, etc.) to `runner/network-policy/seccomp-scanner.json`, copied `runner/images/dummy-scanner` into `runner/Dockerfile`, and added live-Docker execution of `test_live_docker_dummy_scanner_if_docker_available` and `test_live_docker_opengrep_and_gitleaks_if_available` (`2 passed`) to `tests/smoke/phase15_smoke.ps1`. |

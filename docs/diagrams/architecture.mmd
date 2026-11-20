@@ -1,0 +1,52 @@
+flowchart TB
+  %% VForge Enterprise Architecture (v1.2 Baseline + Phase 2 Scope & Policy Boundary Annotation)
+
+  subgraph EDGE["Edge Zone (Loopback 127.0.0.1 in Dev)"]
+    UI["Next.js Dashboard (apps/web :3000)\n[Phase 2: Scope Evaluator, Authz, Snapshots, Audit UI]"]
+  end
+
+  subgraph CONTROL["1 — Control Plane (internal network: control)"]
+    API["FastAPI Control API (apps/api :8000)\n[Phase 2: /api/v1 + vforge-scope + Ed25519 Snapshots]"]
+    DB[("PostgreSQL 18 + Alembic\n[Phase 2: FORCE RLS + Immutable scope_snapshots]")]
+    MQ[("RabbitMQ 4\n[Phase 0: Ready; Queues in Ph3]")]
+    CACHE[("Valkey 9\n[Phase 0: Ready; Coordination in Ph3]")]
+    OPA["OPA v1.22.3 PDP (:8181)\n[Phase 2: Default-Deny RBAC + Scope Decision Policies]"]
+    ORCH["Orchestrator / Dispatcher / Workers\n[Planned: Phase 3+]"]
+  end
+
+  subgraph EXEC["2 — Execution Plane (Separate Linux Runner VM — Planned Phase 4+)"]
+    AGENT["Runner Agent (mTLS outbound)"]
+    GW["Scope-Aware Egress Gateway"]
+    SCANNERS["Ephemeral Scanner Containers\n(OpenGrep, Gitleaks, Syft, Grype, Checkov, ZAP, Nuclei)"]
+  end
+
+  subgraph INTEL["3 — Rule & Skill Engineering Plane (Planned Phase 11–12)"]
+    AUTHOR["AI Rule Author & Provider Gateway"]
+    RULES["Signed Rule Packs & Skill Registry"]
+  end
+
+  subgraph LIFECYCLE["4 — Tool & Intelligence Lifecycle (Planned Phase 9–10)"]
+    MON["Release, Advisory & Threat-Intel Sync"]
+    LOCK["Digest Locks & Regression Lab"]
+  end
+
+  subgraph EVIDENCE["5 — Evidence & Reporting Plane (Planned Phase 8)"]
+    NORM["Normalizer, Correlation & Report Worker"]
+    STORE[("Encrypted Artifact Storage")]
+  end
+
+  UI -->|"HTTP (internal)"| API
+  API --> DB
+  API --> MQ
+  API --> CACHE
+  API --> OPA
+  ORCH -.->|"Planned Ph3"| DB
+  ORCH -.->|"Planned Ph3"| MQ
+  AGENT -.->|"mTLS Polling (No Docker Socket in Control Plane)"| API
+  AGENT -.-> GW
+  AGENT -.-> SCANNERS
+  SCANNERS -.-> NORM
+  NORM -.-> STORE
+  AUTHOR -.-> RULES
+  MON -.-> LOCK
+  LOCK -.-> AGENT
