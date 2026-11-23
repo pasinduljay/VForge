@@ -86,6 +86,14 @@ class OidcClient:
         internal_base = settings.oidc_internal_base_url.rstrip("/")
         if url.startswith(issuer_base):
             return f"{internal_base}{url[len(issuer_base) :]}"
+        if url.startswith(internal_base):
+            return url
+        realm_marker = "/realms/"
+        if realm_marker in internal_base and realm_marker in url:
+            realm_suffix = internal_base[internal_base.index(realm_marker) :]
+            if realm_suffix in url:
+                suffix_pos = url.index(realm_suffix) + len(realm_suffix)
+                return f"{internal_base}{url[suffix_pos:]}"
         return url
 
     async def get_metadata(
@@ -123,7 +131,19 @@ class OidcClient:
 
         discovered_issuer = str(data.get("issuer", "")).rstrip("/")
         expected_issuer = settings.oidc_issuer.rstrip("/")
-        if discovered_issuer != expected_issuer:
+        internal_issuer = (settings.oidc_internal_base_url or "").rstrip("/")
+        issuer_matches = discovered_issuer == expected_issuer
+        if not issuer_matches and internal_issuer:
+            realm_marker = "/realms/"
+            expected_realm = (
+                expected_issuer[expected_issuer.index(realm_marker) :]
+                if realm_marker in expected_issuer
+                else ""
+            )
+            issuer_matches = discovered_issuer == internal_issuer or (
+                bool(expected_realm) and discovered_issuer.endswith(expected_realm)
+            )
+        if not issuer_matches:
             raise UnauthorizedError("OIDC discovery issuer mismatch")
 
         auth_endpoint = str(data.get("authorization_endpoint", ""))
@@ -228,14 +248,17 @@ class OidcClient:
         nonce: str,
         code_challenge: str,
         prompt: str | None = None,
+        redirect_uri: str | None = None,
+        authorization_endpoint_override: str | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> str:
         """Build OIDC Authorization Code + PKCE redirect URL."""
         metadata = await self.get_metadata(settings, http_client=http_client)
+        auth_endpoint = authorization_endpoint_override or metadata.authorization_endpoint
         query_params: dict[str, str] = {
             "response_type": "code",
             "client_id": settings.oidc_client_id,
-            "redirect_uri": settings.oidc_redirect_uri,
+            "redirect_uri": redirect_uri or settings.oidc_redirect_uri,
             "scope": settings.oidc_scopes,
             "state": state,
             "nonce": nonce,
@@ -245,8 +268,8 @@ class OidcClient:
         if prompt:
             query_params["prompt"] = prompt
         params = urlencode(query_params)
-        separator = "&" if "?" in metadata.authorization_endpoint else "?"
-        return f"{metadata.authorization_endpoint}{separator}{params}"
+        separator = "&" if "?" in auth_endpoint else "?"
+        return f"{auth_endpoint}{separator}{params}"
 
     async def build_logout_url(
         self,
@@ -254,13 +277,15 @@ class OidcClient:
         settings: Settings,
         post_logout_redirect_uri: str | None = None,
         id_token_hint: str | None = None,
+        end_session_endpoint_override: str | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> str | None:
         """Build OIDC RP-Initiated Logout URL if the provider advertises end_session_endpoint."""
         if not settings.oidc_enabled or not settings.oidc_issuer:
             return None
         metadata = await self.get_metadata(settings, http_client=http_client)
-        if not metadata.end_session_endpoint:
+        end_session_endpoint = end_session_endpoint_override or metadata.end_session_endpoint
+        if not end_session_endpoint:
             return None
         query_params: dict[str, str] = {}
         if id_token_hint:
@@ -270,10 +295,10 @@ class OidcClient:
         if post_logout_redirect_uri:
             query_params["post_logout_redirect_uri"] = post_logout_redirect_uri
         if not query_params:
-            return metadata.end_session_endpoint
+            return end_session_endpoint
         params = urlencode(query_params)
-        separator = "&" if "?" in metadata.end_session_endpoint else "?"
-        return f"{metadata.end_session_endpoint}{separator}{params}"
+        separator = "&" if "?" in end_session_endpoint else "?"
+        return f"{end_session_endpoint}{separator}{params}"
 
     async def exchange_code_for_tokens(
         self,
@@ -281,6 +306,7 @@ class OidcClient:
         settings: Settings,
         code: str,
         code_verifier: str,
+        redirect_uri: str | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> dict[str, Any]:
         """Exchange authorization code + PKCE code_verifier at token endpoint."""
@@ -288,7 +314,7 @@ class OidcClient:
         form_data: dict[str, str] = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": settings.oidc_redirect_uri,
+            "redirect_uri": redirect_uri or settings.oidc_redirect_uri,
             "client_id": settings.oidc_client_id,
             "code_verifier": code_verifier,
         }
@@ -345,12 +371,12 @@ class OidcClient:
         )
 
         expected_issuer = settings.oidc_issuer.rstrip("/")
+        internal_issuer = (settings.oidc_internal_base_url or "").rstrip("/")
         try:
             claims: dict[str, Any] = jwt.decode(
                 token,
                 key=signing_key.key,
                 algorithms=[alg],
-                issuer=expected_issuer,
                 audience=settings.oidc_client_id,
                 leeway=settings.oidc_clock_skew_seconds,
                 options={
@@ -358,7 +384,7 @@ class OidcClient:
                     "verify_signature": True,
                     "verify_exp": True,
                     "verify_nbf": True,
-                    "verify_iss": True,
+                    "verify_iss": False,
                     "verify_aud": True,
                 },
             )
@@ -372,6 +398,21 @@ class OidcClient:
             raise UnauthorizedError("Invalid token audience") from exc
         except jwt.PyJWTError as exc:
             raise UnauthorizedError("Invalid token signature or claims") from exc
+
+        token_issuer = str(claims.get("iss", "")).rstrip("/")
+        issuer_ok = token_issuer == expected_issuer
+        if not issuer_ok and internal_issuer:
+            realm_marker = "/realms/"
+            expected_realm = (
+                expected_issuer[expected_issuer.index(realm_marker) :]
+                if realm_marker in expected_issuer
+                else ""
+            )
+            issuer_ok = token_issuer == internal_issuer or (
+                bool(expected_realm) and token_issuer.endswith(expected_realm)
+            )
+        if not issuer_ok:
+            raise UnauthorizedError("Invalid token issuer")
 
         aud_claim = claims.get("aud")
         if isinstance(aud_claim, list) and len(aud_claim) > 1:

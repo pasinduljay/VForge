@@ -51,8 +51,33 @@ def _sanitize_redirect_path(redirect_path: str) -> str:
     return cleaned[:512]
 
 
+def _resolve_public_origin(request: Request) -> str | None:
+    """Resolve browser origin forwarded by Next.js / reverse proxy when present."""
+    forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    if not forwarded_host or "/" in forwarded_host or "\\" in forwarded_host:
+        return None
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    scheme = (
+        forwarded_proto
+        if forwarded_proto in {"http", "https"}
+        else (request.url.scheme if request.url.scheme in {"http", "https"} else "http")
+    )
+    return f"{scheme}://{forwarded_host}".rstrip("/")
+
+
+def _resolve_realm_path(settings: Settings) -> str:
+    base = (settings.oidc_internal_base_url or settings.oidc_issuer or "").rstrip("/")
+    marker = "/realms/"
+    if marker in base:
+        return base[base.index(marker) :]
+    return "/realms/vforge"
+
+
 def _resolve_post_logout_redirect_uri(request: Request, settings: Settings) -> str:
-    """Resolve safe post-logout `/login` URI restricted to configured frontend origins."""
+    """Resolve safe post-logout `/login` URI matching the active browser origin."""
+    public_origin = _resolve_public_origin(request)
+    if public_origin and settings.oidc_internal_base_url:
+        return f"{public_origin}/login"
     forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
     host = forwarded_host or (request.headers.get("host") or "").strip()
     forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
@@ -105,12 +130,26 @@ async def oidc_login(
     db.add(auth_state)
     await db.flush()
 
+    public_origin = _resolve_public_origin(request)
+    effective_redirect_uri = (
+        f"{public_origin}/api/v1/auth/oidc/callback"
+        if (public_origin and settings.oidc_internal_base_url)
+        else None
+    )
+    auth_endpoint_override = (
+        f"{public_origin}{_resolve_realm_path(settings)}/protocol/openid-connect/auth"
+        if (public_origin and settings.oidc_internal_base_url)
+        else None
+    )
+
     auth_url = await oidc_client.build_authorization_url(
         settings=settings,
         state=state,
         nonce=nonce,
         code_challenge=code_challenge,
         prompt=prompt,
+        redirect_uri=effective_redirect_uri,
+        authorization_endpoint_override=auth_endpoint_override,
     )
     if mode == "json":
         return JSONResponse({"authorization_url": auth_url})
@@ -168,10 +207,17 @@ async def oidc_callback(
         )
         raise UnauthorizedError("Invalid or expired OIDC state")
 
+    public_origin = _resolve_public_origin(request)
+    effective_redirect_uri = (
+        f"{public_origin}/api/v1/auth/oidc/callback"
+        if (public_origin and settings.oidc_internal_base_url)
+        else None
+    )
     tokens = await oidc_client.exchange_code_for_tokens(
         settings=settings,
         code=code,
         code_verifier=auth_state.code_verifier,
+        redirect_uri=effective_redirect_uri,
     )
     raw_id_token = str(tokens["id_token"])
     identity = await oidc_client.verify_jwt(
@@ -207,7 +253,12 @@ async def oidc_callback(
         metadata={"issuer": identity.issuer},
     )
 
-    target_url = f"{settings.frontend_base_url.rstrip('/')}{auth_state.redirect_path}"
+    base_frontend = (
+        public_origin
+        if (public_origin and settings.oidc_internal_base_url)
+        else settings.frontend_base_url.rstrip("/")
+    )
+    target_url = f"{base_frontend}{auth_state.redirect_path}"
     response = RedirectResponse(url=target_url, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         key=settings.session_cookie_name,
@@ -405,11 +456,18 @@ async def logout(
 
     logout_url: str | None = None
     if settings.oidc_enabled and settings.oidc_issuer:
+        public_origin = _resolve_public_origin(request)
+        end_session_override = (
+            f"{public_origin}{_resolve_realm_path(settings)}/protocol/openid-connect/logout"
+            if (public_origin and settings.oidc_internal_base_url)
+            else None
+        )
         try:
             logout_url = await oidc_client.build_logout_url(
                 settings=settings,
                 post_logout_redirect_uri=_resolve_post_logout_redirect_uri(request, settings),
                 id_token_hint=id_token_hint,
+                end_session_endpoint_override=end_session_override,
             )
         except UnauthorizedError:
             logout_url = None

@@ -48,13 +48,16 @@ async function forwardRequest(
     }
   }
 
-  const host = request.headers.get("host");
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
   if (host) {
-    outboundHeaders.set("x-forwarded-host", host);
+    outboundHeaders.set("x-forwarded-host", host.split(",")[0].trim());
   }
+  const forwardedProto = request.headers.get("x-forwarded-proto");
   outboundHeaders.set(
     "x-forwarded-proto",
-    request.nextUrl.protocol.replace(":", "") || "http",
+    forwardedProto
+      ? forwardedProto.split(",")[0].trim()
+      : request.nextUrl.protocol.replace(":", "") || "http",
   );
 
   const method = request.method.toUpperCase();
