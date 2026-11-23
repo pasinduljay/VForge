@@ -1,0 +1,171 @@
+# ==============================================================================
+# VForge Execution Runner — Portainer Git Repository Stack (VM-2: 192.168.1.120)
+# Deploy directly from Portainer UI -> Stacks -> Add stack -> Repository:
+#   Compose path: docker-compose.portainer-vm2.yml
+#
+# Note: Uses pre-built images + runtime source sync (`runner-init`) instead of
+# `build:` because Portainer Agent (:9001) proxies HTTP/1.1 and does not support
+# BuildKit's raw HTTP/2 gRPC stream over remote agent connections.
+# ==============================================================================
+
+name: vforge-runner
+
+services:
+  docker-cli-init:
+    image: docker:27-cli
+    user: "0:0"
+    restart: "no"
+    command:
+      - "sh"
+      - "-c"
+      - |
+        mkdir -p /opt/vforge/bin
+        cp -f /usr/local/bin/docker /opt/vforge/bin/docker
+        chmod 755 /opt/vforge/bin/docker
+    volumes:
+      - runner_runtime:/opt/vforge
+
+  runner-init:
+    image: python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+    user: "0:0"
+    restart: "no"
+    environment:
+      VFORGE_REPO_TARBALL_URL: ${VFORGE_REPO_TARBALL_URL:-https://codeload.github.com/pasinduljay/VForge/tar.gz/refs/heads/main}
+      RUNNER_MTLS_SEED_SECRET: ${RUNNER_MTLS_SEED_SECRET:-vforge-proxmox-mtls-seed-v1}
+      RUNNER_ORGANIZATION_ID: ${RUNNER_ORGANIZATION_ID:-740bca1c-aa68-4b32-a80b-196bc3264390}
+      RUNNER_ID: ${RUNNER_ID:-11111111-2222-3333-4444-555555555555}
+      RUNNER_CERT_DIR: /run/runner-certs
+    command:
+      - "python"
+      - "-c"
+      - |
+        import io, os, shutil, subprocess, tarfile, urllib.request
+        from pathlib import Path
+
+        base = Path("/opt/vforge")
+        src = base / "src"
+        venv = base / "venv"
+        url = os.environ["VFORGE_REPO_TARBALL_URL"]
+        print(f"[runner-init] Fetching latest VForge source from {url}...")
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            raw = resp.read()
+        if src.exists():
+            shutil.rmtree(src)
+        src.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
+            for member in tf.getmembers():
+                parts = Path(member.name).parts
+                if len(parts) <= 1:
+                    continue
+                rel = Path(*parts[1:])
+                dest = (src / rel).resolve()
+                if not str(dest).startswith(str(src.resolve())):
+                    continue
+                if member.isdir():
+                    dest.mkdir(parents=True, exist_ok=True)
+                elif member.isfile():
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    extracted = tf.extractfile(member)
+                    if extracted is not None:
+                        dest.write_bytes(extracted.read())
+
+        if not (venv / "bin" / "pip").exists():
+            print("[runner-init] Creating runner virtual environment...")
+            subprocess.run(["python", "-m", "venv", str(venv)], check=True)
+
+        pip_bin = str(venv / "bin" / "pip")
+        py_bin = str(venv / "bin" / "python")
+        subprocess.run(
+            [
+                pip_bin,
+                "install",
+                "--no-cache-dir",
+                "--upgrade",
+                str(src / "packages" / "scope-validator"),
+                str(src / "packages" / "scanner-contracts"),
+                str(src / "runner"),
+            ],
+            check=True,
+        )
+
+        for d in ("network-policy", "checkov-policies", "nuclei-templates", "work"):
+            (base / d).mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src / "runner" / "network-policy", base / "network-policy", dirs_exist_ok=True)
+        shutil.copytree(
+            src / "runner" / "images" / "checkov" / "policies",
+            base / "checkov-policies",
+            dirs_exist_ok=True,
+        )
+
+        subprocess.run([py_bin, str(src / "infrastructure" / "portainer" / "init_runner_certs.py")], check=True)
+        for p in base.rglob("*"):
+            try:
+                os.chmod(p, 0o755 if (p.is_dir() or p.parent.name == "bin") else 0o644)
+            except OSError:
+                pass
+        print("[runner-init] Runner environment and mTLS certificates ready.")
+    volumes:
+      - runner_runtime:/opt/vforge
+      - runner_agent_certs:/run/runner-certs
+    depends_on:
+      docker-cli-init:
+        condition: service_completed_successfully
+
+  vforge-runner:
+    image: python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+    restart: unless-stopped
+    command:
+      - "/opt/vforge/venv/bin/vforge-runner"
+      - "--gateway-url"
+      - "https://${VM1_IP:-192.168.1.110}:8443"
+    environment:
+      PATH: /opt/vforge/venv/bin:/opt/vforge/bin:/usr/local/bin:/usr/bin:/bin
+      RUNNER_GATEWAY_URL: https://${VM1_IP:-192.168.1.110}:8443
+      RUNNER_CA_CERT_PATH: /run/runner-certs/ca.crt
+      RUNNER_CLIENT_CERT_PATH: /run/runner-certs/runner.crt
+      RUNNER_CLIENT_KEY_PATH: /run/runner-certs/runner.key
+      RUNNER_SECCOMP_PROFILE: /opt/vforge/network-policy/seccomp-scanner.json
+      RUNNER_ALLOWED_IMAGE_DIGESTS: ${RUNNER_ALLOWED_IMAGE_DIGESTS:-}
+      RUNNER_ORGANIZATION_ID: ${RUNNER_ORGANIZATION_ID:-740bca1c-aa68-4b32-a80b-196bc3264390}
+      RUNNER_POOL_ID: ${RUNNER_POOL_ID:-proxmox-runner-pool-1}
+      RUNNER_EGRESS_NETWORK: vforge_runner_egress
+      RUNNER_EGRESS_BIND_HOST: 0.0.0.0
+      RUNNER_GRYPE_DB_SOURCE: ${RUNNER_GRYPE_DB_SOURCE:-vforge_grype_db}
+      RUNNER_CHECKOV_CUSTOM_POLICIES_DIR: /opt/vforge/checkov-policies
+      RUNNER_NUCLEI_TEMPLATES_DIR: /opt/vforge/nuclei-templates
+    extra_hosts:
+      - "runner-gateway:${VM1_IP:-192.168.1.110}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner_runtime:/opt/vforge:ro
+      - runner_agent_certs:/run/runner-certs:ro
+      - runner_scratch:/opt/runner/work
+    depends_on:
+      runner-init:
+        condition: service_completed_successfully
+    networks:
+      - runner_control
+      - runner_egress
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+
+networks:
+  runner_control:
+    driver: bridge
+  runner_egress:
+    driver: bridge
+
+volumes:
+  runner_runtime:
+  runner_agent_certs:
+  runner_scratch:
