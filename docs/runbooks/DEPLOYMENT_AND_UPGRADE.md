@@ -107,3 +107,15 @@ If a Control Plane code upgrade must be rolled back:
    ```
 3. Checkout the previous verified Git commit/tag and rebuild `api`, `frontend`, `migrator`, `orchestrator`, and `update-controller`.
 4. Re-run `scripts/dr/backup_and_verify.ps1` and the phase smoke suite (`tests/smoke/phase15_smoke.ps1`) to confirm full system health.
+
+---
+
+## 5. Multi-VM Portainer Business Edition GitOps Deployment
+
+For split Control Plane and Execution Plane deployments across two Linux hosts managed via Portainer Business Edition:
+
+- **VM-1 (Control Plane — `docker-compose.portainer-vm1.yml`):**
+  - Self-bootstraps OPA Rego policies, Keycloak realm configuration, Runner Gateway mTLS certificates, least-privilege PostgreSQL roles (`vforge_migrator`, `vforge_app`), RabbitMQ vhost permissions, and Alembic migrations (`0001` through `0018_clean_ai_model_catalog`) via `control-plane-init`.
+- **VM-2 (Execution Plane via Portainer Agent — `docker-compose.portainer-vm2.yml`):**
+  - Uses pre-built container images (`docker:27-cli` and `python:3.13-slim`) with runtime source synchronization in `runner-init` so deployment over Portainer Agent (`:9001`) succeeds without requiring Docker BuildKit HTTP/2 gRPC streaming through the agent proxy.
+
