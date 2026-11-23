@@ -91,7 +91,6 @@ async function forwardRequest(
   const passthroughHeaders = [
     "content-type",
     "content-disposition",
-    "content-length",
     "location",
     "x-correlation-id",
     "cache-control",

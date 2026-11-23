@@ -95,9 +95,7 @@ export async function forwardKeycloakRequest(
   const passthroughHeaders = [
     "content-type",
     "content-disposition",
-    "content-length",
     "location",
-    "cache-control",
     "etag",
     "last-modified",
   ];
@@ -107,6 +105,7 @@ export async function forwardKeycloakRequest(
       responseHeaders.set(name, val);
     }
   }
+  responseHeaders.set("cache-control", "no-cache, no-store, must-revalidate");
 
   const setCookies =
     typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];
@@ -118,6 +117,39 @@ export async function forwardKeycloakRequest(
     if (fallbackCookie) {
       responseHeaders.append("set-cookie", fallbackCookie);
     }
+  }
+
+  const contentType = upstream.headers.get("content-type") || "";
+  if (
+    prefix === "realms" &&
+    upstream.status !== 204 &&
+    upstream.status !== 304 &&
+    contentType.includes("text/html")
+  ) {
+    let html = await upstream.text();
+    html = html.replace(/(\/resources\/[^"'\s>]+?\.(?:css|js))(?=["'\s>])/g, "$1?v=vf2");
+    const themeFixCss = `<style id="vforge-idp-theme-fix">
+      .pf-v5-c-login__main, .pf-c-login__main, .card-pf {
+        background-color: #1b1d21 !important;
+        color: #f1f5f9 !important;
+      }
+      .pf-v5-c-login__main-header, .pf-v5-c-title, #kc-page-title,
+      .pf-v5-c-form__label, .pf-v5-c-form__label-text, .control-label, label {
+        color: #e2e8f0 !important;
+      }
+      .pf-v5-c-form-control, input[type="text"], input[type="password"], input[type="email"] {
+        background-color: #26292d !important;
+        color: #f8fafc !important;
+        border-color: #3f444c !important;
+      }
+    </style>`;
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${themeFixCss}</head>`);
+    }
+    return new NextResponse(html, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
   }
 
   const payload =
