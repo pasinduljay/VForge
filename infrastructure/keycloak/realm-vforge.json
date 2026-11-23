@@ -1,7 +1,8 @@
 {
   "realm": "vforge",
   "enabled": true,
-  "displayName": "VForge Local Development IdP",
+  "displayName": "VForge",
+  "displayNameHtml": "<div class=\"kc-logo-text\"><span>Keycloak</span></div>",
   "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,

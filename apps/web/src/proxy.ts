@@ -12,6 +12,10 @@ function generateNonce(): string {
 }
 
 export function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  if (pathname.startsWith("/realms/") || pathname.startsWith("/resources/")) {
+    return NextResponse.next();
+  }
   const nonce = generateNonce();
   const isDev = process.env.NODE_ENV === "development";
   const isHttps =
@@ -51,7 +55,7 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      source: "/((?!api|realms|resources|_next/static|_next/image|favicon.ico).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
