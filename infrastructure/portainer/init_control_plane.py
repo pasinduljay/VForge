@@ -33,6 +33,7 @@ _SECP256R1_ORDER = int(
     "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16
 )
 DEFAULT_ORG_ID = "740bca1c-aa68-4b32-a80b-196bc3264390"
+DEFAULT_POOL_ID = "c0000001-0000-4000-8000-000000000001"
 DEFAULT_RUNNER_ID = "11111111-2222-3333-4444-555555555555"
 KEYCLOAK_OWNER_ID = "a8746d5f-41ee-439c-9e81-4ac12b19faf2"
 
@@ -237,12 +238,73 @@ def run_alembic_migrations() -> None:
     print("[init] Alembic migrations upgraded to head.")
 
 
-def seed_default_workspace(vm1_ip: str) -> None:
+def _derive_default_runner_cert_metadata(seed: str) -> tuple[str, str, str, datetime.datetime]:
+    ca_key = _derive_ec_key(seed, "vforge-runner-ca-v1")
+    runner_key = _derive_ec_key(seed, f"vforge-runner-client-{DEFAULT_RUNNER_ID}-v1")
+    not_before = datetime.datetime(2026, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
+    not_after = datetime.datetime(2031, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
+    ca_name = x509.Name(
+        [
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "VForge"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "VForge Runner Root CA"),
+        ]
+    )
+    spiffe_uri = f"spiffe://vforge/org/{DEFAULT_ORG_ID}/runner/{DEFAULT_RUNNER_ID}"
+    runner_name = x509.Name(
+        [
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "VForge"),
+            x509.NameAttribute(NameOID.COMMON_NAME, f"vforge-runner-{DEFAULT_RUNNER_ID}"),
+        ]
+    )
+    runner_cert = (
+        x509.CertificateBuilder()
+        .subject_name(runner_name)
+        .issuer_name(ca_name)
+        .public_key(runner_key.public_key())
+        .serial_number(2001)
+        .not_valid_before(not_before)
+        .not_valid_after(not_after)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.SubjectAlternativeName([x509.UniformResourceIdentifier(spiffe_uri)]),
+            critical=False,
+        )
+        .sign(private_key=ca_key, algorithm=hashes.SHA256())
+    )
+    cert_sha256 = hashlib.sha256(
+        runner_cert.public_bytes(serialization.Encoding.DER)
+    ).hexdigest()
+    cert_subject = runner_cert.subject.rfc4514_string()
+    return spiffe_uri, cert_sha256, cert_subject, not_after
+
+
+def seed_default_workspace(vm1_ip: str, seed: str) -> None:
     pg_host = os.environ.get("POSTGRES_HOST", "postgres")
     pg_port = int(os.environ.get("POSTGRES_PORT", "5432"))
     pg_db = os.environ.get("POSTGRES_DB", "vforge")
     pg_super_pw = os.environ["POSTGRES_PASSWORD"]
     oidc_issuer = os.environ.get("OIDC_ISSUER", f"http://{vm1_ip}:8080/realms/vforge")
+    spiffe_uri, cert_sha256, cert_subject, cert_expires_at = _derive_default_runner_cert_metadata(
+        seed
+    )
 
     conninfo = f"host={pg_host} port={pg_port} dbname={pg_db} user=vforge password={pg_super_pw}"
     with psycopg.connect(conninfo, autocommit=True) as conn, conn.cursor() as cur:
@@ -274,7 +336,45 @@ def seed_default_workspace(vm1_ip: str) -> None:
             """,
             (DEFAULT_ORG_ID, user_id),
         )
-    print(f"[init] Seeded workspace {DEFAULT_ORG_ID} for dev-owner@vforge.local ({oidc_issuer}).")
+        cur.execute(
+            """
+            INSERT INTO runner_pools (id, organization_id, name, slug, pool_type, max_concurrent_jobs, active)
+            VALUES (%s, %s, 'Proxmox Execution Pool (VM-2)', 'default-pool', 'standard', 4, true)
+            ON CONFLICT (organization_id, slug) DO NOTHING
+            RETURNING id;
+            """,
+            (DEFAULT_POOL_ID, DEFAULT_ORG_ID),
+        )
+        pool_row = cur.fetchone()
+        pool_id = pool_row[0] if pool_row else uuid.UUID(DEFAULT_POOL_ID)
+        cur.execute(
+            """
+            INSERT INTO runners (
+                id, organization_id, pool_id, name, runner_identity,
+                cert_sha256, cert_subject, cert_expires_at, status, version, capabilities_json
+            )
+            VALUES (
+                %s, %s, %s, 'vm2-proxmox-runner', %s,
+                %s, %s, %s, 'active', '0.1.0',
+                '{"adapters": ["opengrep", "gitleaks", "syft", "grype", "checkov", "zap", "nuclei", "nmap", "testssl"]}'::jsonb
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                cert_sha256 = EXCLUDED.cert_sha256,
+                cert_subject = EXCLUDED.cert_subject,
+                cert_expires_at = EXCLUDED.cert_expires_at,
+                status = 'active';
+            """,
+            (
+                DEFAULT_RUNNER_ID,
+                DEFAULT_ORG_ID,
+                pool_id,
+                spiffe_uri,
+                cert_sha256,
+                cert_subject,
+                cert_expires_at,
+            ),
+        )
+    print(f"[init] Seeded workspace {DEFAULT_ORG_ID} and VM-2 runner {DEFAULT_RUNNER_ID}.")
 
 
 def populate_static_volumes() -> None:
@@ -309,7 +409,7 @@ def main() -> None:
     setup_postgres_roles()
     setup_rabbitmq()
     run_alembic_migrations()
-    seed_default_workspace(vm1_ip)
+    seed_default_workspace(vm1_ip, seed)
     print("[init] Control Plane initialization complete.")
 
 
