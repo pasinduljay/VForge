@@ -1,7 +1,7 @@
 # ==============================================================================
-# VForge Control Plane — Portainer Git Repository Stack (VM-1: 192.168.1.110)
-# Deploy directly from Portainer UI -> Stacks -> Add stack -> Repository:
-#   Compose path: docker-compose.portainer-vm1.yml
+# VForge Control Plane — Self-Bootstrapping Docker Compose Stack
+# Works across VPS, cloud VMs, bare-metal Linux, home labs, and container UIs:
+#   docker compose -f docker-compose.control-plane.yml up -d --build
 # ==============================================================================
 
 name: vforge
@@ -98,11 +98,11 @@ services:
       dockerfile: apps/api/Dockerfile
     pull_policy: build
     user: "0:0"
-    command: ["python", "/opt/portainer-init/init_control_plane.py"]
+    command: ["python", "/opt/bootstrap/init_control_plane.py"]
     restart: "no"
     environment:
       VFORGE_ENV: ${VFORGE_ENV:-development}
-      VM1_IP: ${VM1_IP:-192.168.1.110}
+      VM1_IP: ${CONTROL_PLANE_HOST:-${VM1_IP:-192.168.1.110}}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_DB: vforge

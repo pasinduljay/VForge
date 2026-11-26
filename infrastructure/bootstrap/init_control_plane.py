@@ -1,10 +1,10 @@
-"""Self-contained Portainer GitOps bootstrap for VForge Control Plane (VM-1).
+"""Self-contained bootstrap initializer for the VForge Control Plane.
 
 Automatically configures on stack startup:
 1. PostgreSQL role separation (`vforge_migrator`, `vforge_app`) & schema ownership
 2. RabbitMQ `vforge` vhost and `vforge_app` user permissions
 3. Alembic schema migrations (`alembic upgrade head`)
-4. Initial organization (`VForge Security Workspace`) & OIDC owner membership
+4. Initial organization (`VForge Security Workspace`), OIDC owner membership, and default runner identity
 5. Deterministic ECDSA P-256 mTLS certificates for `runner-gateway` (:8443)
 """
 
@@ -339,7 +339,7 @@ def seed_default_workspace(vm1_ip: str, seed: str) -> None:
         cur.execute(
             """
             INSERT INTO runner_pools (id, organization_id, name, slug, pool_type, max_concurrent_jobs, active)
-            VALUES (%s, %s, 'Proxmox Execution Pool (VM-2)', 'default-pool', 'standard', 4, true)
+            VALUES (%s, %s, 'Default Execution Pool', 'default-pool', 'standard', 4, true)
             ON CONFLICT (organization_id, slug) DO NOTHING
             RETURNING id;
             """,
@@ -354,7 +354,7 @@ def seed_default_workspace(vm1_ip: str, seed: str) -> None:
                 cert_sha256, cert_subject, cert_expires_at, status, version, capabilities_json
             )
             VALUES (
-                %s, %s, %s, 'vm2-proxmox-runner', %s,
+                %s, %s, %s, 'vforge-runner-1', %s,
                 %s, %s, %s, 'active', '0.1.0',
                 '{"adapters": ["opengrep", "gitleaks", "syft", "grype", "checkov", "zap", "nuclei", "nmap", "testssl"]}'::jsonb
             )
@@ -374,7 +374,7 @@ def seed_default_workspace(vm1_ip: str, seed: str) -> None:
                 cert_expires_at,
             ),
         )
-    print(f"[init] Seeded workspace {DEFAULT_ORG_ID} and VM-2 runner {DEFAULT_RUNNER_ID}.")
+    print(f"[init] Seeded workspace {DEFAULT_ORG_ID} and default runner {DEFAULT_RUNNER_ID}.")
 
 
 def populate_static_volumes() -> None:

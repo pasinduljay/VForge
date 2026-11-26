@@ -18,7 +18,7 @@ flowchart LR
       Browser["Web Browser (Dark / Light / System UI)"]
     end
 
-    subgraph ControlPlane["VM-1: VForge Control Plane (No Docker Socket)"]
+    subgraph ControlPlane["Control Plane Host (No Docker Socket)"]
       UI["Next.js 16 Workspace UI (:3000)"]
       API["FastAPI Control Plane (:8000)"]
       Orch["Orchestrator & Outbox Worker"]
@@ -31,7 +31,7 @@ flowchart LR
       IdP["OIDC Identity Provider (:8080)"]
     end
 
-    subgraph ExecutionPlane["VM-2: Isolated Execution Plane (Dedicated Runner Host)"]
+    subgraph ExecutionPlane["Isolated Execution Plane (Dedicated Runner Host)"]
       Agent["vforge-runner Agent (ECDSA P-256 mTLS)"]
       Egress["Scoped Egress Proxy & DNS Pinning"]
       Scanners["Ephemeral Scanners (OpenGrep, Gitleaks, Syft, Grype, Checkov, ZAP, Nuclei, Nmap, testssl.sh)"]
@@ -78,10 +78,10 @@ vforge/
 │   └── web/                             # Next.js 16 App Router UI (self-hosted Inter & JetBrains Mono)
 ├── docs/                                # Architecture Decision Records (ADR-0001..0017), threat model & runbooks
 ├── infrastructure/
+│   ├── bootstrap/                       # Self-bootstrapping DB role, migration & mTLS initializers
 │   ├── keycloak/                        # OIDC realm fixture (realm-vforge.json)
 │   ├── lab/                             # Opt-in isolated OWASP learning lab Compose stack
 │   ├── monitoring/                      # Opt-in Prometheus & Grafana observability stack
-│   ├── portainer/                       # Self-bootstrapping DB role, migration & mTLS initializers
 │   ├── postgres/                        # PostgreSQL role-separation SQL reference
 │   ├── redteam/                         # Opt-in isolated red-team sandbox Compose stack
 │   └── valkey/                          # Valkey 9 ACL template
@@ -95,28 +95,33 @@ vforge/
 ├── scripts/                             # Disposable migration verifier & isolated DR backup/restore drill
 ├── tests/smoke/                         # End-to-end phase smoke test suites
 ├── docker-compose.yml                   # Local development Control Plane Compose stack
-├── docker-compose.portainer-vm1.yml     # Self-bootstrapping Portainer Git stack for VM-1 (Control Plane)
-├── docker-compose.portainer-vm2.yml     # Self-bootstrapping Portainer Git stack for VM-2 (Execution Runner)
+├── docker-compose.control-plane.yml     # Self-bootstrapping Control Plane stack (VPS / on-prem / multi-host)
+├── docker-compose.runner.yml            # Self-bootstrapping Execution Runner stack (remote or local host)
 ├── .env.example                         # Environment template
 └── LICENSE                              # Apache-2.0 License
 ```
 
 ---
 
-## Deployment Option 1: Multi-VM Portainer GitOps Deployment (Proxmox / Linux VMs)
+## Deployment Option 1: Production / Multi-Host Deployment (VPS, Home Lab, or On-Premises)
 
-VForge includes two self-bootstrapping Compose stacks at the repository root so you can deploy the **Control Plane (VM-1)** and **Execution Plane (VM-2)** directly from the **Portainer UI (`Stacks -> + Add stack -> Repository`)** with zero manual terminal scripts:
+VForge ships two self-bootstrapping Docker Compose stacks at the repository root so you can deploy the **Control Plane** and **Execution Plane** cleanly on any Linux server, cloud VPS, home lab, or container orchestrator:
 
-1. **On VM-1 (`Control Plane` environment in Portainer):**
-   - **Repository URL:** `https://github.com/pasinduljay/VForge`
-   - **Repository reference:** `refs/heads/main` (or `refs/heads/dev`)
-   - **Compose path:** `docker-compose.portainer-vm1.yml`
-   - Automatically initializes PostgreSQL roles (`vforge_migrator`, `vforge_app`), RabbitMQ `vforge` vhost, Valkey SHA-256 ACLs, all 18 Alembic migrations, Runner Gateway ECDSA P-256 mTLS certificates, and starts the Control Plane (`:3000` UI, `:8000` API, `:8080` Keycloak, `:8443` mTLS Runner Gateway).
-2. **On VM-2 (`Execution Runner` environment in Portainer):**
-   - **Repository URL:** `https://github.com/pasinduljay/VForge`
-   - **Repository reference:** `refs/heads/main` (or `refs/heads/dev`)
-   - **Compose path:** `docker-compose.portainer-vm2.yml`
-   - Automatically derives the matching ECDSA P-256 client certificate (`spiffe://vforge/...`) and connects `vforge-runner` to VM-1 (`https://<VM1_IP>:8443`) over TLS 1.3 mTLS.
+1. **Control Plane Host (`docker-compose.control-plane.yml`):**
+   ```bash
+   git clone https://github.com/pasinduljay/VForge.git
+   cd VForge
+   CONTROL_PLANE_HOST=<your-server-ip-or-domain> docker compose -f docker-compose.control-plane.yml up -d --build
+   ```
+   - Automatically initializes PostgreSQL roles (`vforge_migrator`, `vforge_app`), RabbitMQ `vforge` vhost permissions, Valkey SHA-256 ACLs, all 18 Alembic migrations, Runner Gateway ECDSA P-256 mTLS certificates, and starts the Control Plane (`:3000` UI, `:8000` API, `:8080` Keycloak, `:8443` mTLS Runner Gateway).
+   - Compatible with any reverse proxy or zero-trust tunnel placed in front of `:3000` (OIDC redirects dynamically honor `X-Forwarded-Host` and `X-Forwarded-Proto`).
+
+2. **Execution Plane Host (`docker-compose.runner.yml`):**
+   ```bash
+   CONTROL_PLANE_HOST=<control-plane-ip-or-domain> docker compose -f docker-compose.runner.yml up -d
+   ```
+   - Derives the matching ECDSA P-256 client certificate (`spiffe://vforge/...`) and connects `vforge-runner` to the Control Plane (`https://<control-plane-ip-or-domain>:8443`) over TLS 1.3 mTLS to execute ephemeral scanner containers.
+   - *(Always rotate `POSTGRES_*`, `RABBITMQ_*`, `VALKEY_*`, `KEYCLOAK_ADMIN_PASSWORD`, and `RUNNER_MTLS_SEED_SECRET` via environment variables or `.env` for internet-facing deployments.)*
 
 ---
 

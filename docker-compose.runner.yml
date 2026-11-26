@@ -1,11 +1,11 @@
 # ==============================================================================
-# VForge Execution Runner — Portainer Git Repository Stack (VM-2: 192.168.1.120)
-# Deploy directly from Portainer UI -> Stacks -> Add stack -> Repository:
-#   Compose path: docker-compose.portainer-vm2.yml
+# VForge Execution Runner — Self-Bootstrapping Docker Compose Stack
+# Works on any dedicated Linux host (VPS, home lab, bare metal, or container UI):
+#   CONTROL_PLANE_HOST=<control-plane-ip-or-domain> docker compose -f docker-compose.runner.yml up -d
 #
-# Note: Uses pre-built images + runtime source sync (`runner-init`) instead of
-# `build:` because Portainer Agent (:9001) proxies HTTP/1.1 and does not support
-# BuildKit's raw HTTP/2 gRPC stream over remote agent connections.
+# Note: Uses pre-built official images + runtime source sync (`runner-init`) so
+# the Execution Plane deploys cleanly over standard Docker APIs and remote
+# agent proxies without requiring remote BuildKit gRPC streaming.
 # ==============================================================================
 
 name: vforge-runner
@@ -97,7 +97,7 @@ services:
             dirs_exist_ok=True,
         )
 
-        subprocess.run([py_bin, str(src / "infrastructure" / "portainer" / "init_runner_certs.py")], check=True)
+        subprocess.run([py_bin, str(src / "infrastructure" / "bootstrap" / "init_runner_certs.py")], check=True)
         for p in base.rglob("*"):
             try:
                 os.chmod(p, 0o755 if (p.is_dir() or p.parent.name == "bin") else 0o644)
@@ -117,24 +117,24 @@ services:
     command:
       - "/opt/vforge/venv/bin/vforge-runner"
       - "--gateway-url"
-      - "https://${VM1_IP:-192.168.1.110}:8443"
+      - "https://${CONTROL_PLANE_HOST:-${VM1_IP:-192.168.1.110}}:8443"
     environment:
       PATH: /opt/vforge/venv/bin:/opt/vforge/bin:/usr/local/bin:/usr/bin:/bin
-      RUNNER_GATEWAY_URL: https://${VM1_IP:-192.168.1.110}:8443
+      RUNNER_GATEWAY_URL: https://${CONTROL_PLANE_HOST:-${VM1_IP:-192.168.1.110}}:8443
       RUNNER_CA_CERT_PATH: /run/runner-certs/ca.crt
       RUNNER_CLIENT_CERT_PATH: /run/runner-certs/runner.crt
       RUNNER_CLIENT_KEY_PATH: /run/runner-certs/runner.key
       RUNNER_SECCOMP_PROFILE: /opt/vforge/network-policy/seccomp-scanner.json
       RUNNER_ALLOWED_IMAGE_DIGESTS: ${RUNNER_ALLOWED_IMAGE_DIGESTS:-}
       RUNNER_ORGANIZATION_ID: ${RUNNER_ORGANIZATION_ID:-740bca1c-aa68-4b32-a80b-196bc3264390}
-      RUNNER_POOL_ID: ${RUNNER_POOL_ID:-proxmox-runner-pool-1}
+      RUNNER_POOL_ID: ${RUNNER_POOL_ID:-default-runner-pool-1}
       RUNNER_EGRESS_NETWORK: vforge_runner_egress
       RUNNER_EGRESS_BIND_HOST: 0.0.0.0
       RUNNER_GRYPE_DB_SOURCE: ${RUNNER_GRYPE_DB_SOURCE:-vforge_grype_db}
       RUNNER_CHECKOV_CUSTOM_POLICIES_DIR: /opt/vforge/checkov-policies
       RUNNER_NUCLEI_TEMPLATES_DIR: /opt/vforge/nuclei-templates
     extra_hosts:
-      - "runner-gateway:${VM1_IP:-192.168.1.110}"
+      - "runner-gateway:${CONTROL_PLANE_HOST:-${VM1_IP:-192.168.1.110}}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner_runtime:/opt/vforge:ro

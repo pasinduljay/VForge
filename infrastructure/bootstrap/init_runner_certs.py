@@ -1,7 +1,7 @@
-"""Self-contained Portainer GitOps mTLS certificate bootstrap for VForge Runner (VM-2).
+"""Self-contained mTLS certificate bootstrap for the VForge Execution Runner.
 
 Derives the matching Runner Root CA and ECDSA P-256 client certificate (`spiffe://vforge/...`)
-from `RUNNER_MTLS_SEED_SECRET` so VM-2 can be deployed directly from Portainer UI without manual scp.
+from `RUNNER_MTLS_SEED_SECRET` so remote or headless runner hosts can join cleanly on first boot.
 """
 
 from __future__ import annotations

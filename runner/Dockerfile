@@ -30,7 +30,7 @@ COPY --chown=10001:10001 runner/network-policy ./network-policy
 COPY --chown=10001:10001 runner/images/checkov/policies ./checkov-policies
 COPY --chown=10001:10001 runner/images/dummy-scanner ./images/dummy-scanner
 COPY --chown=10001:10001 runner/tests ./tests
-COPY --chown=10001:10001 infrastructure/portainer /opt/portainer-init
+COPY --chown=10001:10001 infrastructure/bootstrap /opt/bootstrap
 
 RUN pip install --no-cache-dir /opt/packages/scope-validator /opt/packages/scanner-contracts ".[dev]"
 
